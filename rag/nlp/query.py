@@ -23,6 +23,7 @@ from collections import defaultdict
 from rag.utils.doc_store_conn import MatchTextExpr
 from rag.nlp import rag_tokenizer, term_weight, synonym
 
+from multiprocessing import Pool 
 
 class FulltextQueryer:
     def __init__(self):
@@ -212,8 +213,7 @@ class FulltextQueryer:
             return np.array(tksim), tksim, sims[0]
         return np.array(sims[0]) * vtweight + np.array(tksim) * tkweight, tksim, sims[0]
 
-    def token_similarity(self, atks, btkss):
-        def toDict(tks):
+    def toDict(self, tks):
             if isinstance(tks, str):
                 tks = tks.split()
             d = defaultdict(int)
@@ -222,8 +222,11 @@ class FulltextQueryer:
                 d[t] += c
             return d
 
-        atks = toDict(atks)
-        btkss = [toDict(tks) for tks in btkss]
+    def token_similarity(self, atks, btkss):
+        atks =  self.toDict(atks)
+        with Pool(processes=48) as pool:
+            btkss = pool.map(self.toDict, btkss)
+        # btkss = [toDict(tks) for tks in btkss]
         return [self.similarity(atks, btks) for btks in btkss]
 
     def similarity(self, qtwt, dtwt):
