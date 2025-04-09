@@ -13,6 +13,9 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 #
+import uuid
+import time
+import logging
 from flask import request, jsonify
 
 from api.db import LLMType
@@ -27,6 +30,12 @@ from rag.app.tag import label_question
 @apikey_required
 @validate_request("knowledge_id", "query")
 def retrieval(tenant_id):
+    # 总耗时
+    total_time = time.time()
+    # 生成随机任务 ID
+    task_id = uuid.uuid4().hex 
+    logging.info(f"Task  ID: {task_id} - 请求参数：{request.json} - Request received")
+
     req = request.json
     question = req["query"]
     kb_id = req["knowledge_id"]
@@ -34,18 +43,28 @@ def retrieval(tenant_id):
     retrieval_setting = req.get("retrieval_setting", {})
     similarity_threshold = float(retrieval_setting.get("score_threshold", 0.0))
     top = int(retrieval_setting.get("top_k", 1024))
-
+    logging.info(f"Task  ID: {task_id} - request: {question} - Request received")
+    doc_ids = req.get("document_ids", [])
+    doc_ids_list = KnowledgebaseService.list_documents_by_ids([kb_id])
+    for doc_id in doc_ids:
+        if doc_id not in doc_ids_list:
+            return build_error_result(message=f"The datasets don't own the document {doc_id}", code=settings.RetCode.SERVER_ERROR)
+    
     try:
-
+        start_time = time.time()
         e, kb = KnowledgebaseService.get_by_id(kb_id)
+        logging.info(f"Task  ID: {task_id} - request: {question} - 获取文档信息耗时 {time.time()  - start_time:.4f} seconds")
+        start_time = time.time()
         if not e:
             return build_error_result(message="Knowledgebase not found!", code=settings.RetCode.NOT_FOUND)
 
         if kb.tenant_id != tenant_id:
             return build_error_result(message="Knowledgebase not found!", code=settings.RetCode.NOT_FOUND)
-
+        start_time = time.time() 
         embd_mdl = LLMBundle(kb.tenant_id, LLMType.EMBEDDING.value, llm_name=kb.embd_id)
-
+        logging.info(f"Task  ID: {task_id} - request: {question} - Initializing embedding model took {time.time()  - start_time:.4f} seconds")
+        
+        start_time = time.time() 
         ranks = settings.retrievaler.retrieval(
             question,
             embd_mdl,
@@ -56,17 +75,23 @@ def retrieval(tenant_id):
             similarity_threshold=similarity_threshold,
             vector_similarity_weight=0.3,
             top=top,
+            doc_ids = doc_ids,
             rank_feature=label_question(question, [kb])
         )
-
+        logging.info(f"Task  ID: {task_id} - request: {question}- Retrieving ranks took {time.time()  - start_time:.4f} seconds")
         if use_kg:
+            start_time = time.time() 
             ck = settings.kg_retrievaler.retrieval(question,
                                                    [tenant_id],
                                                    [kb_id],
                                                    embd_mdl,
                                                    LLMBundle(kb.tenant_id, LLMType.CHAT))
+            logging.info(f"Task  ID: {task_id} - request: {question}- Retrieving knowledge graph took {time.time()  - start_time:.4f} seconds")
+
             if ck["content_with_weight"]:
                 ranks["chunks"].insert(0, ck)
+
+        start_time = time.time() 
 
         records = []
         for c in ranks["chunks"]:
@@ -77,7 +102,7 @@ def retrieval(tenant_id):
                 "title": c["docnm_kwd"],
                 "metadata": {}
             })
-
+        logging.info(f"Task  ID: {task_id} - request: {question} - return result  {time.time()  - total_time:.4f} seconds")
         return jsonify({"records": records})
     except Exception as e:
         if str(e).find("not_found") > 0:
