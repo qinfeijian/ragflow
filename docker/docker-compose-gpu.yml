@@ -25,7 +25,7 @@ services:
       # - ../api/apps/api_app.py:/ragflow/api/apps/api_app.py
       # - ../api/settings.py:/ragflow/api/settings.py
       # - ../rag/nlp/search.py:/ragflow/rag/nlp/search.py
-      # - ../rag/nlp/query.py:/ragflow/rag/nlp/query.py
+      - ../rag/nlp/query.py:/ragflow/rag/nlp/query.py
       # - ../rag/app/tag.py:/ragflow/rag/app/tag.py
     env_file: .env
     environment:
